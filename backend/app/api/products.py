@@ -1,12 +1,11 @@
-import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.product import Brand, Category, Product, RecentlyViewed, Review
+from app.models.product import Brand, Category, Product, ProductImage, RecentlyViewed, Review
 from app.models.user import User
 from app.schemas.product import ProductCreate, ProductOut, ReviewCreate, ReviewOut
 from app.services.deps import get_current_user, require_admin
@@ -153,24 +152,42 @@ def create_product(payload: ProductCreate, _: User = Depends(require_admin), db:
 
 # --- Admin helpers: image upload, edit, delete -------------------------------
 
-UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
-ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-MAX_IMAGE_BYTES = 5 * 1024 * 1024
+ALLOWED_IMAGE_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+MAX_IMAGE_BYTES = 3 * 1024 * 1024
 
 
 @router.post("/upload-image")
-async def upload_image(file: UploadFile = File(...), _: User = Depends(require_admin)):
-    """Admin-only: upload a product photo. Returns the URL to store in image_url."""
+async def upload_image(file: UploadFile = File(...), _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Admin-only: upload a product photo (kept in the database). Returns the URL to store in image_url."""
     ext = Path(file.filename or "").suffix.lower()
-    if ext not in ALLOWED_IMAGE_EXT:
+    if ext not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(status_code=400, detail="Please upload a JPG, PNG, WEBP or GIF image")
     data = await file.read()
     if len(data) > MAX_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="Image is too large (max 5 MB)")
-    name = f"{uuid.uuid4().hex}{ext}"
-    (UPLOAD_DIR / name).write_bytes(data)
-    return {"url": f"/uploads/{name}"}
+        raise HTTPException(status_code=413, detail="Image is too large (max 3 MB)")
+    image = ProductImage(content_type=ALLOWED_IMAGE_TYPES[ext], data=data)
+    db.add(image)
+    db.commit()
+    db.refresh(image)
+    return {"url": f"/api/products/images/{image.id}"}
+
+
+@router.get("/images/{image_id}", include_in_schema=False)
+def get_image(image_id: int, db: Session = Depends(get_db)):
+    image = db.get(ProductImage, image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return Response(
+        content=image.data,
+        media_type=image.content_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @router.put("/{product_id}", response_model=ProductOut)

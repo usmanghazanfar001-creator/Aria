@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, Boolean
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -90,3 +90,14 @@ class RecentlyViewed(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
     viewed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductImage(Base):
+    """Uploaded product photo, stored in the database so it survives restarts on any host."""
+
+    __tablename__ = "product_images"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(50), default="image/jpeg")
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
